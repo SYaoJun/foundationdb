@@ -27,6 +27,8 @@
 
 // Keep trying to become a leader by submitting itself to all coordinators.
 // Monitor the health of all coordinators at the same time.
+// 持续尝试通过向所有协调器提交自身来成为领导者。【给所有coordinators自荐】
+// 同时监视所有协调器的健康状况。
 ACTOR Future<Void> submitCandidacy(Key key,
                                    LeaderElectionRegInterface coord,
                                    LeaderInfo myInfo,
@@ -115,7 +117,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
 	state UID prevChangeID;
-
+	/*yaojun: Coordinator 的第一个职责是协调并选举出一个合适的 controller 成为 leader*/
 	if (asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad ||
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote ||
 	    asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessNotPreferred ||
@@ -124,7 +126,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	} else if (asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit) {
 		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 	}
-
+	/*yaojun: 这个变量leaderElectionServers是在coordinators初始化时赋值的，能connection就有几率被提名。
+	coordinators.leaderElectionServers是不是就是controller？领导者选举服务器
+	*/
 	nominees.resize(coordinators.leaderElectionServers.size());
 
 	myInfo.serializedInfo = proposedSerializedInterface;
@@ -143,6 +147,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		std::vector<Future<Void>> cand;
 		cand.reserve(coordinators.leaderElectionServers.size());
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+			/*yaojun: 每个controller向所有coordinators自荐成为Leader*/
 			cand.push_back(submitCandidacy(coordinators.clusterKey,
 			                               coordinators.leaderElectionServers[i],
 			                               myInfo,
@@ -153,6 +158,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		candidacies = waitForAll(cand);
 
 		loop {
+			/*yaojun: 在众多被提名者中选出Leader的函数！*/
 			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
 			if (leader.present() && leader.get().first.forward) {
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need

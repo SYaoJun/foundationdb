@@ -535,9 +535,13 @@ ACTOR Future<Void> monitorNominee(Key key,
 // Also used in fdbserver/LeaderElection.actor.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
+// 也用于 fdbserver/LeaderElection.actor.cpp！
+// bool 表示 LeaderInfo 是否为多数答案。
+// 此函数还掩码了被提名者的 changeId 的前 7 位，并返回掩码后的 Leader。
 Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees) {
 	// If any coordinator says that the quorum is forwarded, then it is
 	for (int i = 0; i < nominees.size(); i++)
+		/*yaojun: 如果这个被提名的索引存在，且任何一个coordinator说quorum已转发，那么直接返回*/
 		if (nominees[i].present() && nominees[i].get().forward)
 			return std::pair<LeaderInfo, bool>(nominees[i].get(), true);
 
@@ -545,6 +549,9 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 	maskedNominees.reserve(nominees.size());
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
+			/*yaojun: 这个mask是用来干嘛的？
+			通过 disk paxos 运行的coordinators 会选出来一个主进程(leader) 叫做 ClusterController
+			前七位表示做cluster_controller的适合度，越低越好，当changeID变差或有候选人拥有更好的changeID时，开启Leader选举*/
 			maskedNominees.emplace_back(
 			    UID(nominees[i].get().changeID.first() & LeaderInfo::changeIDMask, nominees[i].get().changeID.second()),
 			    i);
@@ -553,7 +560,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 
 	if (!maskedNominees.size())
 		return Optional<std::pair<LeaderInfo, bool>>();
-
+	/*yaojun: 这里是按照uid从小到大排序*/
 	std::sort(maskedNominees.begin(),
 	          maskedNominees.end(),
 	          [](const std::pair<UID, int>& l, const std::pair<UID, int>& r) { return l.first < r.first; });
@@ -562,6 +569,11 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 	int bestIdx = 0;
 	int currentIdx = 0;
 	int curCount = 1;
+	/*yaojun: 这个算法是干嘛的呀？
+	举例: 1,1,1,2,2,3,3,3,3,5,5
+	那么这里的bestCount = 4
+	意思是找出这个masked被提名者里出现频率最高的UID，然后判断这个频率是否超过大多数。	
+	*/
 	for (int i = 1; i < maskedNominees.size(); i++) {
 		if (maskedNominees[currentIdx].first == maskedNominees[i].first) {
 			curCount++;
